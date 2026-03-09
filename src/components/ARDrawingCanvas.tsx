@@ -3,6 +3,7 @@ import { useHandTracking, type HandData } from "@/hooks/useHandTracking";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { GestureIndicator } from "./GestureIndicator";
 import { HandOverlay } from "./HandOverlay";
+import { FloatingColorPalette } from "./FloatingColorPalette";
 
 interface Stroke {
   points: { x: number; y: number }[];
@@ -34,6 +35,9 @@ export function ARDrawingCanvas() {
   const [brushSize, setBrushSize] = useState(4);
   const [isEraser, setIsEraser] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [hoveredColorIndex, setHoveredColorIndex] = useState<number | null>(null);
+  const [isColorMode, setIsColorMode] = useState(false);
+  const colorModeFingerPos = useRef<{ x: number; y: number } | null>(null);
 
   const prevDrawingRef = useRef(false);
   const prevOpenRef = useRef(false);
@@ -69,7 +73,7 @@ export function ARDrawingCanvas() {
 
   // Smooth position
   const smoothPosition = useCallback((raw: { x: number; y: number }) => {
-    const alpha = 0.4;
+    const alpha = 0.2; // Lower = smoother but slightly more lag
     if (!smoothPosRef.current) {
       smoothPosRef.current = raw;
       return raw;
@@ -115,18 +119,70 @@ export function ARDrawingCanvas() {
     }
     prevOpenRef.current = handData.isOpen;
 
+    // Color picking mode: peace sign gesture
+    if (handData.isColorPicking) {
+      setIsColorMode(true);
+      // Calculate finger position on screen
+      {
+        const container = containerRef.current;
+        if (container) {
+          const fingerX = (1 - handData.indexTip.x) * container.clientWidth;
+          const fingerY = handData.indexTip.y * container.clientHeight;
+          colorModeFingerPos.current = { x: fingerX, y: fingerY };
+
+          // Hit-test against color palette positions
+          // Palette is centered at top, each swatch is 48px wide with 16px gap
+          const paletteWidth = COLORS.length * 48 + (COLORS.length - 1) * 16 + 48; // padding
+          const paletteLeft = (container.clientWidth - paletteWidth) / 2 + 24;
+          const paletteTop = 32 + 16; // top-8 (32px) + padding
+
+          let newHoveredIndex: number | null = null;
+          for (let i = 0; i < COLORS.length; i++) {
+            const cx = paletteLeft + i * (48 + 16) + 24;
+            const cy = paletteTop + 24;
+            const dist = Math.sqrt((fingerX - cx) ** 2 + (fingerY - cy) ** 2);
+            if (dist < 36) {
+              newHoveredIndex = i;
+              break;
+            }
+          }
+          setHoveredColorIndex(newHoveredIndex);
+        }
+      }
+      prevDrawingRef.current = false;
+      return;
+    }
+
+    // If we were in color mode and just left it, apply the hovered color
+    let activeColor = selectedColor;
+    if (isColorMode) {
+      if (hoveredColorIndex !== null) {
+        activeColor = COLORS[hoveredColorIndex];
+        setSelectedColor(activeColor);
+        setIsEraser(false);
+      }
+      setIsColorMode(false);
+      setHoveredColorIndex(null);
+      colorModeFingerPos.current = null;
+    }
+
     if (handData.isDrawing && !handData.isPinching) {
       if (!prevDrawingRef.current) {
         // Start new stroke
         setCurrentStroke({
           points: [pos],
-          color: isEraser ? "erase" : selectedColor,
+          color: isEraser ? "erase" : activeColor,
           width: isEraser ? brushSize * 4 : brushSize,
         });
       } else if (currentStroke) {
-        setCurrentStroke((prev) =>
-          prev ? { ...prev, points: [...prev.points, pos] } : null
-        );
+        // Only add point if it's far enough from the last point (reduces jitter)
+        const lastPt = currentStroke.points[currentStroke.points.length - 1];
+        const dist = Math.sqrt((pos.x - lastPt.x) ** 2 + (pos.y - lastPt.y) ** 2);
+        if (dist > 2) {
+          setCurrentStroke((prev) =>
+            prev ? { ...prev, points: [...prev.points, pos] } : null
+          );
+        }
       }
       prevDrawingRef.current = true;
     } else {
@@ -136,7 +192,7 @@ export function ARDrawingCanvas() {
       setCurrentStroke(null);
       prevDrawingRef.current = false;
     }
-  }, [handData, selectedColor, brushSize, isEraser, smoothPosition]);
+  }, [handData, selectedColor, brushSize, isEraser, smoothPosition, isColorMode, hoveredColorIndex]);
 
   // Render drawing canvas
   useEffect(() => {
@@ -163,18 +219,34 @@ export function ARDrawingCanvas() {
       ctx.lineJoin = "round";
 
       ctx.beginPath();
-      // Catmull-Rom interpolation for smooth lines
+      // Smooth bezier curves for better interpolation
       const pts = stroke.points;
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length - 1; i++) {
-        const xc = (pts[i].x + pts[i + 1].x) / 2;
-        const yc = (pts[i].y + pts[i + 1].y) / 2;
-        ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+      if (pts.length === 1) {
+        // Single point - draw a dot
+        ctx.arc(pts[0].x, pts[0].y, stroke.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (pts.length === 2) {
+        // Two points - straight line
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.stroke();
+      } else {
+        // Multiple points - smooth bezier curves
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length - 2; i++) {
+          const xc = (pts[i].x + pts[i + 1].x) / 2;
+          const yc = (pts[i].y + pts[i + 1].y) / 2;
+          ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+        }
+        // Last segment
+        ctx.quadraticCurveTo(
+          pts[pts.length - 2].x,
+          pts[pts.length - 2].y,
+          pts[pts.length - 1].x,
+          pts[pts.length - 1].y
+        );
+        ctx.stroke();
       }
-      if (pts.length > 1) {
-        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-      }
-      ctx.stroke();
       ctx.shadowBlur = 0;
     }
     ctx.globalCompositeOperation = "source-over";
@@ -268,6 +340,15 @@ export function ARDrawingCanvas() {
             selectedColor={selectedColor}
           />
 
+          {/* Floating color palette for hand gesture color picking */}
+          <FloatingColorPalette
+            colors={COLORS}
+            selectedColor={selectedColor}
+            hoveredIndex={hoveredColorIndex}
+            visible={isColorMode}
+            fingerPos={colorModeFingerPos.current}
+          />
+
           {/* Loading overlay */}
           {(isLoading || !cameraReady) && (
             <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/90 backdrop-blur-md">
@@ -282,8 +363,9 @@ export function ARDrawingCanvas() {
           {cameraReady && !isLoading && !handData && (
             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-30 bg-card/90 backdrop-blur-sm border border-border rounded-xl px-6 py-4 text-center max-w-md">
               <p className="text-sm text-foreground font-medium mb-2">Show your hand to start drawing</p>
-              <div className="flex gap-4 text-xs text-muted-foreground justify-center">
+              <div className="flex gap-4 text-xs text-muted-foreground justify-center flex-wrap">
                 <span>☝️ Index finger = Draw</span>
+                <span>✌️ Peace sign = Pick Color</span>
                 <span>🤏 Pinch = Pause</span>
                 <span>🖐️ Open hand = Clear</span>
               </div>

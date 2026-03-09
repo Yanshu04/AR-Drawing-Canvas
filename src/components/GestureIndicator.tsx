@@ -17,7 +17,10 @@ export function GestureIndicator({ handData, isEraser }: GestureIndicatorProps) 
 
   let gesture = "IDLE";
   let color = "bg-muted-foreground";
-  if (handData.isDrawing && !handData.isPinching) {
+  if (handData.isColorPicking) {
+    gesture = "COLOR PICK ✌️";
+    color = "bg-blue-500";
+  } else if (handData.isDrawing && !handData.isPinching) {
     gesture = isEraser ? "ERASING" : "DRAWING";
     color = isEraser ? "bg-destructive" : "bg-primary";
   } else if (handData.isPinching) {

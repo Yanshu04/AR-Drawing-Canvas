@@ -8,6 +8,7 @@ export interface HandData {
   isDrawing: boolean; // index up, others down
   isPinching: boolean; // index + thumb close
   isOpen: boolean; // all fingers open
+  isColorPicking: boolean; // index + middle up, ring + pinky down (peace sign)
 }
 
 function fingerIsUp(landmarks: NormalizedLandmark[], tipIdx: number, pipIdx: number) {
@@ -78,8 +79,9 @@ export function useHandTracking(videoRef: React.RefObject<HTMLVideoElement | nul
         const isDrawing = indexUp && !middleUp && !ringUp && !pinkyUp;
         const isPinching = distance(indexTip, thumbTip) < 0.05;
         const isOpen = indexUp && middleUp && ringUp && pinkyUp;
+        const isColorPicking = indexUp && middleUp && !ringUp && !pinkyUp && !isPinching;
 
-        setHandData({ landmarks: lm, indexTip, thumbTip, isDrawing, isPinching, isOpen });
+        setHandData({ landmarks: lm, indexTip, thumbTip, isDrawing, isPinching, isOpen, isColorPicking });
       } else {
         setHandData(null);
       }

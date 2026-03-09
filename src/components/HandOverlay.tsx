@@ -52,11 +52,21 @@ export function HandOverlay({ canvasRef, handData, isEraser, brushSize, selected
       ctx.fill();
     }
 
-    // Cursor around index tip
+    // Cursor around index tip with subtle pulse
     const ix = (1 - handData.indexTip.x) * w;
     const iy = handData.indexTip.y * h;
+    const radius = isEraser ? brushSize * 4 : brushSize * 2 + 6;
+    
+    // Outer pulse ring
     ctx.beginPath();
-    ctx.arc(ix, iy, isEraser ? brushSize * 4 : brushSize * 2 + 6, 0, Math.PI * 2);
+    ctx.arc(ix, iy, radius + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = isEraser ? "hsla(0, 72%, 55%, 0.2)" : `${selectedColor.replace(')', ', 0.2)')}`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    
+    // Main cursor
+    ctx.beginPath();
+    ctx.arc(ix, iy, radius, 0, Math.PI * 2);
     ctx.strokeStyle = isEraser ? "hsla(0, 72%, 55%, 0.6)" : selectedColor;
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
